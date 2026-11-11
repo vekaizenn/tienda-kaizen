@@ -69,4 +69,748 @@
     const WHATSAPP_PHONE = "584124384009";
     const INSTAGRAM_USER = "kaizenn.ve";
     const INSTAGRAM_URL = "https://www.instagram.com/kaizenn.ve/";
-    const ADMIN_EMAIL = "leandrojmendozap@gmail.
+    const ADMIN_EMAIL = "leandrojmendozap@gmail.com";
+    const ADMIN_PIN = "3601";
+
+    // Componente del Logo Oficial Kaizen. con Macintosh/Finder
+    const KaizenLogo = ({ className = "h-8" }) => (
+      <div className={`flex items-center gap-2 ${className}`}>
+        <svg viewBox="0 0 100 80" className="h-full w-auto flex-shrink-0" fill="none">
+          {/* Ícono Retro Finder/Macintosh */}
+          <rect x="5" y="5" width="40" height="42" rx="6" stroke="#092A4B" strokeWidth="4" fill="white" />
+          <line x1="5" y1="36" x2="45" y2="36" stroke="#092A4B" strokeWidth="3" />
+          <rect x="13" y="14" width="4" height="7" rx="2" fill="#092A4B" />
+          <rect x="33" y="14" width="4" height="7" rx="2" fill="#092A4B" />
+          <path d="M 20 28 Q 25 32 30 28" stroke="#092A4B" strokeWidth="3" strokeLinecap="round" fill="none" />
+          <rect x="20" y="40" width="10" height="2" rx="1" fill="#092A4B" />
+          <line x1="52" y1="2" x2="52" y2="48" stroke="#092A4B" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+        <span className="font-extrabold text-2xl tracking-tight text-[#092A4B] leading-none flex items-baseline">
+          <span className="text-[#FF6500]">K</span>aizen<span className="text-[#FF6500] text-3xl leading-none">.</span>
+        </span>
+      </div>
+    );
+
+    // Optimizador de enlaces de Google Drive para carga rápida
+    const optimizeDriveUrl = (url, size = 400) => {
+      if (!url) return "";
+      if (url.includes("googleusercontent.com") || url.includes("drive.google.com")) {
+        const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+        if (idMatch && idMatch[1]) {
+          return `https://lh3.googleusercontent.com/d/${idMatch[1]}=w${size}-h${size}-c`;
+        }
+      }
+      return url;
+    };
+
+    function App() {
+      const [products, setProducts] = useState([]);
+      const [drivePhotos, setDrivePhotos] = useState({});
+      const [isLoading, setIsLoading] = useState(true);
+      const [searchQuery, setSearchQuery] = useState("");
+      const [selectedCategory, setSelectedCategory] = useState("all");
+      const [cart, setCart] = useState([]);
+      const [isCartOpen, setIsCartOpen] = useState(false);
+      const [selectedProduct, setSelectedProduct] = useState(null);
+      const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+      // Estado de Administrador
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+      const [adminInputEmail, setAdminInputEmail] = useState("");
+      const [adminInputPin, setAdminInputPin] = useState("");
+      const [adminError, setAdminError] = useState("");
+
+      // Cargar productos del CSV de Google Sheets
+      const fetchProducts = async () => {
+        setIsLoading(true);
+        try {
+          const timestamp = new Date().getTime();
+          const targetUrl = `${DEFAULT_CSV_URL}&_t=${timestamp}`;
+          
+          let csvText = "";
+          try {
+            const res = await fetch(targetUrl, { cache: "no-store" });
+            if (res.ok) csvText = await res.text();
+          } catch (e) {
+            console.log("Fallo directo, intentando vía proxy seguro...");
+          }
+
+          if (!csvText || csvText.includes("<!DOCTYPE html>")) {
+            const proxyRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`);
+            csvText = await proxyRes.text();
+          }
+
+          if (csvText) {
+            parseCSVData(csvText);
+          }
+        } catch (err) {
+          console.error("Error al sincronizar Google Sheets:", err);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      // Cargar fotos desde el Script de Google Drive
+      const fetchDrivePhotos = async () => {
+        try {
+          const cached = localStorage.getItem("kaizen_drive_photos");
+          if (cached) {
+            try {
+              setDrivePhotos(JSON.parse(cached));
+            } catch(e){}
+          }
+          
+          const res = await fetch(`${DEFAULT_DRIVE_SCRIPT_URL}?t=${new Date().getTime()}`);
+          const data = await res.json();
+          if (data && typeof data === "object") {
+            setDrivePhotos(data);
+            localStorage.setItem("kaizen_drive_photos", JSON.stringify(data));
+          }
+        } catch (err) {
+          console.log("Drive photos en segundo plano...");
+        }
+      };
+
+      // Parser robusto de CSV
+      const parseCSVData = (csv) => {
+        const lines = [];
+        let row = [];
+        let inQuotes = false;
+        let currentValue = '';
+
+        for (let i = 0; i < csv.length; i++) {
+          const char = csv[i];
+          const nextChar = csv[i + 1];
+
+          if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+              currentValue += '"';
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === ',' && !inQuotes) {
+            row.push(currentValue.trim());
+            currentValue = '';
+          } else if ((char === '\r' || char === '\n') && !inQuotes) {
+            if (char === '\r' && nextChar === '\n') i++;
+            row.push(currentValue.trim());
+            if (row.some(cell => cell.length > 0)) lines.push(row);
+            row = [];
+            currentValue = '';
+          } else {
+            currentValue += char;
+          }
+        }
+        if (currentValue || row.length > 0) {
+          row.push(currentValue.trim());
+          if (row.some(cell => cell.length > 0)) lines.push(row);
+        }
+
+        // Buscar encabezados en las primeras filas
+        let headerIndex = -1;
+        let descCol = 0, bcvCol = 2, codeCol = 4;
+
+        for (let i = 0; i < Math.min(lines.length, 6); i++) {
+          const r = lines[i].map(c => c.toLowerCase());
+          const dIdx = r.findIndex(c => c.includes("descripci"));
+          const bIdx = r.findIndex(c => c.includes("tasa bcv") || c.includes("bcv"));
+          if (dIdx !== -1 && bIdx !== -1) {
+            headerIndex = i;
+            descCol = dIdx;
+            bcvCol = bIdx;
+            const cIdx = r.findIndex(c => c.includes("código") || c.includes("codigo"));
+            if (cIdx !== -1) codeCol = cIdx;
+            break;
+          }
+        }
+
+        const parsedProducts = [];
+        const startRow = headerIndex !== -1 ? headerIndex + 1 : 2;
+
+        for (let i = startRow; i < lines.length; i++) {
+          const r = lines[i];
+          if (!r || r.length <= descCol) continue;
+
+          const desc = r[descCol] || "";
+          const priceRaw = r[bcvCol] || "";
+          const code = (r[codeCol] || "").replace(/\s+/g, '');
+
+          // Ignorar encabezados residuales, totales o vacíos
+          if (!desc || desc.toLowerCase().includes("catálogo") || desc.toLowerCase().includes("descripción")) continue;
+
+          // Limpiar valor numérico del precio
+          let numericPrice = priceRaw.replace(/[^0-9.,]/g, '').replace(',', '.');
+          let finalPrice = parseFloat(numericPrice);
+
+          if (isNaN(finalPrice) || finalPrice <= 0) continue;
+
+          // Categorización automática según la descripción
+          let category = "Accesorios";
+          const dUpper = desc.toUpperCase();
+          if (dUpper.includes("CABLE") || dUpper.includes("CARGADOR") || dUpper.includes("POWERBANK") || dUpper.includes("BATERIA") || dUpper.includes("ESTACION DE ENERGIA")) {
+            category = "Cables y Energía";
+          } else if (dUpper.includes("STARLINK") || dUpper.includes("HUB") || dUpper.includes("ADAPTADOR") || dUpper.includes("ROUTER")) {
+            category = "Starlink y Conectividad";
+          } else if (dUpper.includes("TECLADO") || dUpper.includes("MOUSE") || dUpper.includes("MONITOR") || dUpper.includes("MOUSEPAD") || dUpper.includes("SOPORTE")) {
+            category = "Periféricos";
+          } else if (dUpper.includes("AUDIFONOS") || dUpper.includes("LUZ") || dUpper.includes("STREAMING") || dUpper.includes("MICROFONO") || dUpper.includes("ALEXA")) {
+            category = "Audio y Luces";
+          }
+
+          parsedProducts.push({
+            id: code || `PROD-${i}`,
+            code: code || `P${String(i).padStart(4, '0')}`,
+            name: desc,
+            price: finalPrice,
+            category: category,
+            rawRow: i
+          });
+        }
+
+        if (parsedProducts.length > 0) {
+          setProducts(parsedProducts);
+        }
+      };
+
+      useEffect(() => {
+        fetchProducts();
+        fetchDrivePhotos();
+      }, []);
+
+      // Filtrado interactivo
+      const filteredProducts = useMemo(() => {
+        return products.filter(p => {
+          const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                              p.code.toLowerCase().includes(searchQuery.toLowerCase());
+          const matchCat = selectedCategory === "all" || p.category === selectedCategory;
+          return matchSearch && matchCat;
+        });
+      }, [products, searchQuery, selectedCategory]);
+
+      // Control del Carrito
+      const addToCart = (product) => {
+        setCart(prev => {
+          const existing = prev.find(item => item.id === product.id);
+          if (existing) {
+            return prev.map(item => item.id === product.id ? { ...item, qty: item.qty + 1 } : item);
+          }
+          return [...prev, { ...product, qty: 1 }];
+        });
+        setIsCartOpen(true);
+      };
+
+      const updateQty = (id, delta) => {
+        setCart(prev => prev.map(item => {
+          if (item.id === id) {
+            const newQty = item.qty + delta;
+            return newQty > 0 ? { ...item, qty: newQty } : null;
+          }
+          return item;
+        }).filter(Boolean));
+      };
+
+      const cartTotal = useMemo(() => {
+        return cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      }, [cart]);
+
+      // Enviar a WhatsApp oficial
+      const sendWhatsAppOrder = () => {
+        if (cart.length === 0) return;
+        let text = "*¡Hola Kaizen.! Quiero realizar el siguiente pedido desde el catálogo web:*\n\n";
+        cart.forEach(item => {
+          text += `• ${item.qty}x ${item.name} (${item.code}) — *${(item.price * item.qty).toFixed(2)}$ Tasa BCV*\n`;
+        });
+        text += `\n*TOTAL A PAGAR: ${cartTotal.toFixed(2)}$ Tasa BCV*\n`;
+        text += "• *Entrega:* Delivery Gratis en Valencia / San Diego\n\n";
+        text += "¿Me podrían confirmar disponibilidad y datos de pago?";
+
+        const url = `https://api.whatsapp.com/send?phone=${WHATSAPP_PHONE}&text=${encodeURIComponent(text)}`;
+        window.open(url, "_blank");
+      };
+
+      // Login Admin
+      const handleAdminLogin = (e) => {
+        e.preventDefault();
+        if (adminInputEmail.trim().toLowerCase() === ADMIN_EMAIL && adminInputPin.trim() === ADMIN_PIN) {
+          setIsAdmin(true);
+          setIsAdminModalOpen(false);
+          setAdminError("");
+        } else {
+          setAdminError("Correo o clave maestra incorrectos.");
+        }
+      };
+
+      // Obtener fotos de un producto (Drive o Respaldo)
+      const getProductImages = (code) => {
+        if (drivePhotos[code] && Array.isArray(drivePhotos[code]) && drivePhotos[code].length > 0) {
+          return drivePhotos[code];
+        }
+        return ["https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=600&q=80"];
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col safe-bottom">
+          {/* Barra Superior con Instagram y Delivery */}
+          <div className="bg-[#092A4B] text-white text-xs py-2 px-4">
+            <div className="max-w-7xl mx-auto flex justify-between items-center">
+              <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-[#FF6500] transition-colors font-medium">
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                </svg>
+                <span>@{INSTAGRAM_USER}</span>
+              </a>
+              <div className="flex items-center gap-3">
+                <span className="hidden sm:inline text-slate-300">San Diego, Edo. Carabobo</span>
+                <span className="bg-[#FF6500] text-white px-2 py-0.5 rounded-full font-bold text-[10px]">Delivery Gratis Valencia / San Diego</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Encabezado Principal */}
+          <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm safe-top">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+              <KaizenLogo className="h-8 md:h-10 cursor-pointer" />
+
+              {/* Barra de Búsqueda */}
+              <div className="flex-1 max-w-lg relative hidden sm:block">
+                <input 
+                  type="text"
+                  placeholder="Buscar por código (ej. P00100) o nombre..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-100 border border-slate-200 rounded-full py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-[#FF6500] focus:bg-white transition-all"
+                />
+                <svg className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+
+              {/* Botones de Cabecera */}
+              <div className="flex items-center gap-3">
+                <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="hidden lg:flex items-center gap-1.5 text-xs font-semibold text-[#092A4B] bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-full transition-colors">
+                  <span>Instagram</span>
+                </a>
+
+                {/* Carrito */}
+                <button 
+                  onClick={() => setIsCartOpen(true)}
+                  className="bg-[#092A4B] text-white hover:bg-[#FF6500] px-4 py-2 rounded-full font-bold text-sm flex items-center gap-2 transition-colors relative shadow-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  </svg>
+                  <span>Carrito</span>
+                  {cart.length > 0 && (
+                    <span className="bg-[#FF6500] text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-black">
+                      {cart.reduce((a, b) => a + b.qty, 0)}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Búsqueda en Móviles */}
+            <div className="px-4 pb-2.5 sm:hidden">
+              <input 
+                type="text"
+                placeholder="Buscar producto o código..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-100 border border-slate-200 rounded-full py-2 px-4 text-xs focus:outline-none focus:border-[#FF6500]"
+              />
+            </div>
+          </header>
+
+          {/* Banner de Inicio Destacado */}
+          <div className="bg-[#092A4B] text-white py-8 px-4 relative overflow-hidden">
+            <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
+              <div className="max-w-xl text-center md:text-left">
+                <span className="bg-[#FF6500] text-white text-xs font-extrabold uppercase tracking-widest px-3 py-1 rounded-full mb-3 inline-block">
+                  Catálogo Oficial Kaizen.
+                </span>
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight mb-3">
+                  TECNOLOGÍA Y ACCESORIOS ORIGINALES.
+                </h1>
+                <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+                  Cables de 240W, cargadores rápidos GaN, periféricos y accesorios Starlink con entrega inmediata en Valencia y San Diego.
+                </p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 text-center">
+                <div className="text-xs text-slate-300 mb-1">Precios Actualizados</div>
+                <div className="text-2xl font-black text-white">Tasa Oficial BCV</div>
+                <div className="text-xs text-[#F1FFC4] mt-1 font-semibold">Garantía y entrega local inmediata</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Filtros de Categorías */}
+          <div className="bg-white border-b border-slate-200 sticky top-[57px] sm:top-[65px] z-30 shadow-xs">
+            <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+              {[
+                { id: "all", label: "Todos los Productos" },
+                { id: "Cables y Energía", label: "Cables y Energía" },
+                { id: "Starlink y Conectividad", label: "Starlink y Conectividad" },
+                { id: "Periféricos", label: "Periféricos y Monitores" },
+                { id: "Audio y Luces", label: "Audio y Luces" }
+              ].map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                    selectedCategory === cat.id 
+                      ? "bg-[#FF6500] text-white shadow-sm" 
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Catálogo de Productos */}
+          <main className="max-w-7xl mx-auto px-3 sm:px-4 py-6 flex-1 w-full">
+            <div className="flex items-center justify-between mb-4">
+              {/* Título limpio sin etiqueta adicional */}
+              <h2 className="text-lg sm:text-xl font-black text-[#092A4B]">
+                Explora nuestro catálogo en Tecnología Kaizen.
+              </h2>
+              <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                {filteredProducts.length} disponibles
+              </span>
+            </div>
+
+            {isLoading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                {[...Array(10)].map((_, i) => (
+                  <div key={i} className="bg-white rounded-xl p-3 border border-slate-200 animate-pulse h-64"></div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                {filteredProducts.map(p => {
+                  const photos = getProductImages(p.code);
+                  const thumb = optimizeDriveUrl(photos[0], 400);
+
+                  return (
+                    <div 
+                      key={p.id}
+                      className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col justify-between group"
+                    >
+                      {/* Área de Imagen con Protección contra copia */}
+                      <div 
+                        className="relative pt-[100%] bg-white cursor-pointer overflow-hidden border-b border-slate-100"
+                        onClick={() => { setSelectedProduct(p); setCurrentImageIndex(0); }}
+                      >
+                        <img 
+                          src={thumb} 
+                          alt={p.name}
+                          loading="lazy"
+                          decoding="async"
+                          className="absolute inset-0 w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300 prevent-save"
+                          onError={(e) => {
+                            e.target.src = "https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=400&q=80";
+                          }}
+                        />
+                        {/* Escudo invisible protector de clic */}
+                        <div className="absolute inset-0 z-10"></div>
+                        <span className="absolute top-2 right-2 z-20 bg-slate-900/70 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                          {p.code}
+                        </span>
+                      </div>
+
+                      {/* Información de Producto */}
+                      <div className="p-3 flex-1 flex flex-col justify-between">
+                        <div>
+                          <div className="text-[10px] font-bold text-[#FF6500] uppercase mb-1 truncate">
+                            {p.category}
+                          </div>
+                          <h3 
+                            className="font-bold text-xs sm:text-sm text-slate-800 line-clamp-2 hover:text-[#092A4B] cursor-pointer mb-2 leading-snug"
+                            onClick={() => { setSelectedProduct(p); setCurrentImageIndex(0); }}
+                          >
+                            {p.name}
+                          </h3>
+                        </div>
+
+                        <div>
+                          {/* Precio oficial: Formato 80$ Tasa BCV */}
+                          <div className="mb-2.5">
+                            <span className="text-base sm:text-lg font-black text-[#092A4B]">
+                              {p.price.toFixed(0)}$
+                            </span>
+                            <span className="text-[11px] font-extrabold text-slate-500 ml-1">
+                              Tasa BCV
+                            </span>
+                          </div>
+
+                          <button 
+                            onClick={() => addToCart(p)}
+                            className="w-full bg-[#092A4B] hover:bg-[#FF6500] text-white py-1.5 px-3 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 active:scale-95"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                            <span>Agregar</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </main>
+
+          {/* MODAL DETALLES DEL PRODUCTO (Optimizado para teléfonos móviles) */}
+          {selectedProduct && (
+            <div 
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto"
+              onClick={() => setSelectedProduct(null)}
+            >
+              <div 
+                className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[85dvh] flex flex-col overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-6 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Cabecera Fija del Modal (Siempre visible) */}
+                <div className="sticky top-0 z-30 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <span className="bg-[#092A4B] text-white text-[11px] font-mono px-2 py-0.5 rounded font-bold">
+                      {selectedProduct.code}
+                    </span>
+                    <span className="text-xs text-slate-500 ml-2 font-medium">
+                      {selectedProduct.category}
+                    </span>
+                  </div>
+
+                  {/* Botón Cerrar (✕) Accesible */}
+                  <button 
+                    onClick={() => setSelectedProduct(null)}
+                    className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-lg active:scale-90 transition-transform"
+                    aria-label="Cerrar ventana"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Contenido Desplazable del Producto */}
+                <div className="overflow-y-auto p-4 sm:p-6 space-y-4">
+                  {/* Visor de Fotos */}
+                  <div className="relative aspect-square max-h-72 w-full bg-white rounded-xl border border-slate-100 flex items-center justify-center overflow-hidden">
+                    <img 
+                      src={optimizeDriveUrl(getProductImages(selectedProduct.code)[currentImageIndex], 800)} 
+                      alt={selectedProduct.name}
+                      className="max-h-full max-w-full object-contain p-2 prevent-save"
+                    />
+                    <div className="absolute inset-0 z-10"></div>
+                  </div>
+
+                  {/* Miniaturas de Fotos (Ordenadas 1, 2, 3...) */}
+                  {getProductImages(selectedProduct.code).length > 1 && (
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                      {getProductImages(selectedProduct.code).map((img, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setCurrentImageIndex(idx)}
+                          className={`relative w-14 h-14 rounded-lg border-2 overflow-hidden flex-shrink-0 bg-white ${
+                            currentImageIndex === idx ? "border-[#FF6500]" : "border-slate-200 opacity-60"
+                          }`}
+                        >
+                          <img src={optimizeDriveUrl(img, 150)} className="w-full h-full object-contain prevent-save" />
+                          <span className="absolute bottom-0 right-0 bg-slate-900/80 text-white text-[9px] px-1 font-mono">
+                            {idx + 1}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Título y Precio */}
+                  <div>
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 leading-snug mb-2">
+                      {selectedProduct.name}
+                    </h2>
+                    
+                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] text-slate-500 font-bold uppercase">Precio Oficial</div>
+                        <div className="text-2xl font-black text-[#092A4B]">
+                          {selectedProduct.price.toFixed(0)}$ <span className="text-xs font-bold text-slate-500">Tasa BCV</span>
+                        </div>
+                      </div>
+                      <span className="bg-[#F1FFC4] text-slate-800 text-[11px] font-bold px-2.5 py-1 rounded-md">
+                        Disponible
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Acciones del Modal */}
+                  <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                    <button 
+                      onClick={() => { addToCart(selectedProduct); setSelectedProduct(null); }}
+                      className="flex-1 bg-[#FF6500] hover:bg-[#e05900] text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-colors active:scale-98"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                      </svg>
+                      <span>Agregar al Carrito</span>
+                    </button>
+                    <button 
+                      onClick={() => setSelectedProduct(null)}
+                      className="sm:w-32 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold text-xs transition-colors"
+                    >
+                      Volver
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CARRITO DE COMPRAS LATERAL */}
+          {isCartOpen && (
+            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex justify-end" onClick={() => setIsCartOpen(false)}>
+              <div 
+                className="bg-white w-full max-w-md h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-[#092A4B] text-white safe-top">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-5 h-5 text-[#FF6500]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                    </svg>
+                    <h3 className="font-black text-base">Tu Carrito Kaizen.</h3>
+                  </div>
+                  <button onClick={() => setIsCartOpen(false)} className="text-white hover:text-slate-300 font-bold p-1">
+                    ✕
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {cart.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400">
+                      <p className="text-sm font-medium">El carrito está vacío</p>
+                    </div>
+                  ) : (
+                    cart.map(item => (
+                      <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div className="flex-1 pr-2">
+                          <div className="text-[10px] font-mono text-slate-400 font-bold">{item.code}</div>
+                          <div className="text-xs font-bold text-slate-800 line-clamp-1">{item.name}</div>
+                          <div className="text-xs font-black text-[#092A4B] mt-0.5">
+                            {(item.price * item.qty).toFixed(0)}$ <span className="text-[10px] font-medium text-slate-500">Tasa BCV</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                          <button onClick={() => updateQty(item.id, -1)} className="text-slate-500 font-bold px-1 hover:text-black">-</button>
+                          <span className="text-xs font-black w-4 text-center">{item.qty}</span>
+                          <button onClick={() => updateQty(item.id, 1)} className="text-[#FF6500] font-bold px-1 hover:text-black">+</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {cart.length > 0 && (
+                  <div className="p-4 border-t border-slate-200 bg-white space-y-3 safe-bottom">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs font-bold text-slate-500 uppercase">Total Estimado</span>
+                      <span className="text-xl font-black text-[#092A4B]">
+                        {cartTotal.toFixed(0)}$ <span className="text-xs font-extrabold text-slate-500">Tasa BCV</span>
+                      </span>
+                    </div>
+
+                    <button 
+                      onClick={sendWhatsAppOrder}
+                      className="w-full bg-[#25D366] hover:bg-[#20ba59] text-white py-3 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-sm transition-transform active:scale-98"
+                    >
+                      <span>Enviar Pedido por WhatsApp</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* PIE DE PÁGINA */}
+          <footer className="bg-white border-t border-slate-200 py-8 px-4 text-xs text-slate-500 mt-auto">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+              <div className="flex items-center gap-2">
+                <KaizenLogo className="h-6" />
+                <span>• Tecnología y Accesorios Importados</span>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="hover:text-[#FF6500] font-semibold">
+                  Instagram @{INSTAGRAM_USER}
+                </a>
+
+                {/* Acceso Administrador */}
+                {isAdmin ? (
+                  <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">
+                    Admin Activo
+                  </span>
+                ) : (
+                  <button 
+                    onClick={() => setIsAdminModalOpen(true)}
+                    className="hover:text-slate-800 transition-colors"
+                  >
+                    🔒 Acceso Admin
+                  </button>
+                )}
+              </div>
+            </div>
+          </footer>
+
+          {/* MODAL DE LOGIN ADMIN */}
+          {isAdminModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+                <button onClick={() => setIsAdminModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-black">✕</button>
+                <h3 className="font-black text-base text-[#092A4B] mb-4">Acceso de Administrador</h3>
+                
+                <form onSubmit={handleAdminLogin} className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1">Correo Electrónico</label>
+                    <input 
+                      type="email"
+                      value={adminInputEmail}
+                      onChange={(e) => setAdminInputEmail(e.target.value)}
+                      placeholder="correo@gmail.com"
+                      required
+                      className="w-full border border-slate-200 rounded-lg p-2 text-xs focus:border-[#FF6500] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1">Clave Maestra</label>
+                    <input 
+                      type="password"
+                      value={adminInputPin}
+                      onChange={(e) => setAdminInputPin(e.target.value)}
+                      placeholder="••••"
+                      required
+                      className="w-full border border-slate-200 rounded-lg p-2 text-xs focus:border-[#FF6500] outline-none"
+                    />
+                  </div>
+
+                  {adminError && <div className="text-xs font-bold text-red-500">{adminError}</div>}
+
+                  <button type="submit" className="w-full bg-[#092A4B] text-white py-2 rounded-lg font-bold text-xs hover:bg-[#FF6500] transition-colors">
+                    Iniciar Sesión
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
